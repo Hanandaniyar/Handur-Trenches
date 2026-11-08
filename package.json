@@ -1,0 +1,24 @@
+{
+  "name": "handur-log-parser",
+  "version": "1.0.0",
+  "description": "High-performance EVM log parser for ERC-20 transfers and Uniswap V3 swap events.",
+  "main": "handur_log_parser.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "handur",
+    "uniswap-v3",
+    "erc20",
+    "ethers",
+    "evm",
+    "web3",
+    "log-parser"
+  ],
+  "author": "Handur Developer",
+  "license": "MIT",
+  "peerDependencies": {
+    "ethers": "^6.0.0"
+  }
+}
