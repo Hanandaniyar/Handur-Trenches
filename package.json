@@ -5,7 +5,7 @@
   "main": "handur_log_parser.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [
     "handur",
@@ -20,5 +20,14 @@
   "license": "MIT",
   "peerDependencies": {
     "ethers": "^6.0.0"
+  },
+  "files": [
+    "handur_log_parser.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "ethers": "^6.13.0"
   }
 }
