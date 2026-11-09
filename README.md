@@ -1,27 +1,27 @@
 
 # ⚡ Handur | Trenches. Analyze. Grow.
 
-> **High-Performance Web3 Trench Analytics & Real-Time On-Chain Intelligence**
+> **Real-time EVM log parser for ERC-20 transfers and Uniswap V3 swaps**
 
-Handur is a lightweight, dark-mode crypto analytics web application engineered for token tracking, liquidity pool monitoring, and parsing real-time EVM logs directly from Uniswap V3 and ERC-20 smart contracts.
+Handur is a lightweight JavaScript module (Ethers.js v6) that decodes raw on-chain logs into clean, ready-to-use objects: token transfers, swap amounts, spot prices, and trade direction. It is the data layer for the upcoming Handur trench-analytics web app.
 
 ---
 
 ## 🚀 Features
 
-- **⚡ Real-Time Log Parser:** Fast decoding of `Transfer` and Uniswap V3 `Swap` events using Ethers.js v6.
-- **📊 Precise Price Calculations:** Exact spot price derivation from $Q96$ (`sqrtPriceX96`) accounting for multi-decimal token pairs.
-- **🌊 Trade Direction Sensing:** Automatic identification of swap directions (`BUY` vs `SELL`) relative to pool token balances.
-- **📡 WebSocket & Polling Support:** Subscribe to live liquidity pool feeds or batch-parse historical transaction logs.
-- **🎨 Sleek Cyberpunk UI:** Custom glassmorphism design with keyframe visual animations and dark-mode aesthetic.
+- **⚡ Log Parser:** Decodes ERC-20 `Transfer` and Uniswap V3 `Swap` events. ERC-721 transfers (same topic, different shape) are skipped instead of mis-parsed.
+- **📊 Spot Price from `sqrtPriceX96`:** Converts the pool's Q96 price into a human-readable price, adjusted for each token's decimals.
+- **🌊 Trade Direction:** Labels each swap as `BUY <token0>` or `BUY <token1>` from the sign of the pool's token amounts.
+- **🔢 Per-token Decimals:** Pass token and pool metadata so USDC (6 decimals), WBTC (8), etc. are formatted correctly.
+- **📡 Live or Batch:** Subscribe to a pool over WebSocket, or batch-parse historical logs from `provider.getLogs()`.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend:** Vanilla HTML5, CSS3 (Custom Variables & Animations)
+- **Runtime:** Node.js 18+ or any modern browser bundler (ES modules)
 - **Blockchain Integration:** [Ethers.js v6](https://docs.ethers.org/v6/)
-- **DEX Standard:** Uniswap V3 Pool Protocol & ERC-20 Standard
+- **Standards:** ERC-20, Uniswap V3 Pool
 
 ---
 
@@ -29,36 +29,64 @@ Handur is a lightweight, dark-mode crypto analytics web application engineered f
 
 ### Installation
 
-Import `HandurLogParser` into your Web3 application:
+```bash
+git clone https://github.com/Hanandaniyar/Handur-Trenches.git
+cd Handur-Trenches
+npm install
+```
+
+### Live swaps
 
 ```javascript
-import { HandurLogParser, calculateUniswapV3Price } from "./handur_log_parser.js";
+import { HandurLogParser } from "./handur_log_parser.js";
 import { ethers } from "ethers";
 
-// Initialize Provider (WebSocket recommended for live streams)
+// WebSocket provider recommended for live streams
 const provider = new ethers.WebSocketProvider("wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY");
 
-// Create Parser Instance
-const parser = new HandurLogParser(provider);
-
-// Subscribe to Live Uniswap V3 Swaps (e.g. USDC / WETH 0.05% Pool)
+// USDC / WETH 0.05% pool
 const USDC_WETH_POOL = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640";
 
-const stopListening = parser.subscribeToPoolSwaps(
-  USDC_WETH_POOL,
-  (err, swap) => {
-    if (err) return console.error("Swap Parsing Error:", err);
+const parser = new HandurLogParser(provider, {
+  [USDC_WETH_POOL]: { decimals0: 6, decimals1: 18, symbol0: "USDC", symbol1: "WETH" }
+});
 
-    console.log(`[SWAP DETECTED] ${swap.direction}`);
-    console.log(`Price: ${swap.priceToken0InToken1.toFixed(4)} WETH per USDC`);
-    console.log(`Tx Hash: ${swap.transactionHash}`);
-  },
-  { decimals0: 6, decimals1: 18, symbol0: "USDC", symbol1: "WETH" }
+const stopListening = parser.subscribeToPoolSwaps(USDC_WETH_POOL, (err, swap) => {
+  if (err) return console.error("Swap Parsing Error:", err);
+
+  console.log(`[SWAP DETECTED] ${swap.direction}`);
+  console.log(`Price: ${swap.priceToken0InToken1} WETH per USDC`);
+  console.log(`Tx Hash: ${swap.transactionHash}`);
+});
+```
+
+### Batch-parse historical logs
+
+```javascript
+const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
+const parser = new HandurLogParser(
+  provider,
+  { [USDC_WETH_POOL]: { decimals0: 6, decimals1: 18, symbol0: "USDC", symbol1: "WETH" } },
+  { [USDC]: { decimals: 6, symbol: "USDC" } } // token metadata for Transfer amounts
 );
+
+const logs = await provider.getLogs({ address: [USDC, USDC_WETH_POOL], fromBlock: -100 });
+const { transfers, swaps, unknown } = parser.parseLogs(logs);
+```
+
+Addresses in the config can be checksummed or lower-case. Tokens or pools missing from the config fall back to 18 decimals and generic symbols (`TOKEN`, `TOKEN0`, `TOKEN1`).
+
+---
+
+## 🧪 Tests
+
+```bash
+npm test
 ```
 
 ---
 
 ## 📜 License
 
-MIT License
+[MIT](LICENSE)

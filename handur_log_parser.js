@@ -50,11 +50,19 @@ export function calculateUniswapV3Price(sqrtPriceX96, decimals0 = 18, decimals1 
 // -----------------------------------------------------------------------------
 
 /**
+ * ERC-20 and ERC-721 share the same Transfer topic. ERC-20 has 3 topics
+ * (amount in data); ERC-721 has 4 (tokenId indexed), so it is rejected here.
+ */
+export function isErc20TransferLog(log) {
+  return Boolean(log) && log.topics?.[0] === EVENT_TOPICS.TRANSFER && log.topics.length === 3;
+}
+
+/**
  * Parses raw EVM log into a structured ERC-20 Transfer Event object.
  */
 export function parseTransferLog(log, tokenDecimals = 18, tokenSymbol = "TOKEN") {
-  if (!log || log.topics[0] !== EVENT_TOPICS.TRANSFER) {
-    throw new Error("Invalid or non-Transfer log topic");
+  if (!isErc20TransferLog(log)) {
+    throw new Error("Invalid or non-ERC-20 Transfer log");
   }
 
   const parsed = erc20Interface.parseLog({ topics: log.topics, data: log.data });
@@ -78,7 +86,7 @@ export function parseTransferLog(log, tokenDecimals = 18, tokenSymbol = "TOKEN")
 /**
  * Parses raw EVM log into a structured Uniswap V3 Swap Event object.
  */
-export function parseUniswapV3SwapLog(log, poolMeta = { decimals0: 18, decimals1: 18, symbol0: "TOKEN0", symbol1: "TOKEN1" }) {
+export function parseUniswapV3SwapLog(log, poolMeta = {}) {
   if (!log || log.topics[0] !== EVENT_TOPICS.UNISWAP_V3_SWAP) {
     throw new Error("Invalid or non-Uniswap V3 Swap log topic");
   }
@@ -86,7 +94,8 @@ export function parseUniswapV3SwapLog(log, poolMeta = { decimals0: 18, decimals1
   const parsed = uniswapV3Interface.parseLog({ topics: log.topics, data: log.data });
   const { sender, recipient, amount0, amount1, sqrtPriceX96, liquidity, tick } = parsed.args;
 
-  const { decimals0, decimals1, symbol0, symbol1 } = poolMeta;
+  // Fill in any missing fields so partial or absent metadata never yields "undefined" symbols.
+  const { decimals0 = 18, decimals1 = 18, symbol0 = "TOKEN0", symbol1 = "TOKEN1" } = poolMeta || {};
 
   const formattedAmount0 = ethers.formatUnits(amount0, decimals0);
   const formattedAmount1 = ethers.formatUnits(amount1, decimals1);
@@ -125,26 +134,41 @@ export function parseUniswapV3SwapLog(log, poolMeta = { decimals0: 18, decimals1
 // Batch & Live Subscription Module
 // -----------------------------------------------------------------------------
 
+// Lower-cases address keys so lookups work whether config uses checksummed or lower-case addresses.
+function normalizeAddressKeys(config = {}) {
+  return Object.fromEntries(
+    Object.entries(config).map(([address, meta]) => [address.toLowerCase(), meta])
+  );
+}
+
 export class HandurLogParser {
-  constructor(provider, poolConfig = {}) {
+  /**
+   * @param provider   Ethers v6 provider
+   * @param poolConfig  { [poolAddress]: { decimals0, decimals1, symbol0, symbol1 } }
+   * @param tokenConfig { [tokenAddress]: { decimals, symbol } } — used for Transfer amounts
+   */
+  constructor(provider, poolConfig = {}, tokenConfig = {}) {
     this.provider = provider;
-    this.poolConfig = poolConfig; // { [poolAddress]: { decimals0, decimals1, symbol0, symbol1 } }
+    this.poolConfig = normalizeAddressKeys(poolConfig);
+    this.tokenConfig = normalizeAddressKeys(tokenConfig);
   }
 
   /**
-   * Batch parse mixed raw logs (Transfers & Swaps)
+   * Batch parse mixed raw logs (Transfers & Swaps).
+   * Transfers from tokens missing in tokenConfig fall back to 18 decimals.
    */
   parseLogs(logs) {
     const results = { transfers: [], swaps: [], unknown: [] };
 
     for (const log of logs) {
       const topic0 = log.topics[0];
+      const address = log.address.toLowerCase();
       try {
-        if (topic0 === EVENT_TOPICS.TRANSFER) {
-          results.transfers.push(parseTransferLog(log));
+        if (isErc20TransferLog(log)) {
+          const token = this.tokenConfig[address] || {};
+          results.transfers.push(parseTransferLog(log, token.decimals, token.symbol));
         } else if (topic0 === EVENT_TOPICS.UNISWAP_V3_SWAP) {
-          const meta = this.poolConfig[log.address.toLowerCase()] || {};
-          results.swaps.push(parseUniswapV3SwapLog(log, meta));
+          results.swaps.push(parseUniswapV3SwapLog(log, this.poolConfig[address]));
         } else {
           results.unknown.push(log);
         }
@@ -159,7 +183,7 @@ export class HandurLogParser {
   /**
    * Subscribe to live Uniswap V3 Swap logs for a target pool address
    */
-  subscribeToPoolSwaps(poolAddress, callback, poolMeta = {}) {
+  subscribeToPoolSwaps(poolAddress, callback, poolMeta = this.poolConfig[poolAddress.toLowerCase()]) {
     const filter = {
       address: poolAddress,
       topics: [EVENT_TOPICS.UNISWAP_V3_SWAP]
